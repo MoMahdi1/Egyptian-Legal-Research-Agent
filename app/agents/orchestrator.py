@@ -61,7 +61,8 @@ def orchestrator_node(state: ResearchState) -> ResearchState:
     
     # Rewrite the original query
     improved_query = rewrite_query(original_question)
-    
+    print("=== REWRITE TEST ===")
+    print(improved_query)
     # Generate multiple search queries
     generation_prompt = f"""
     انت باحث قانونى متخصص فى القانون المصرى .

@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from app.tools.retriever import vectorstore
 from app.tools.search import web_search
 
+from app.agents.reranker import rerank_documents
 
 MIN_RELEVANT_DOCS = 2
 MAX_SCORE_THRESHOLD = 0.30
@@ -49,10 +50,25 @@ def retriever_agent(query: str) -> Dict[str, Any]:
             print(
                 f"[retriever_agent] Found {len(filtered_docs)} relevant docs in ChromaDB"
             )
+            
+            # Rerank the retrieved documents
+            reranked_results = rerank_documents(
+                query=query,
+                documents=filtered_docs,
+                top_k=3
+            ) 
+            
+            print("\n========== RERANKED RESULTS ==========")
+            
+            for i , doc in enumerate(reranked_results, 1):
+                print(
+                    f"[RERANK {i}] "
+                    f"Score: {doc['rerank_score']}"
+                )
 
             return {
                 "source": "documents",
-                "results": filtered_docs,
+                "results": reranked_results,
                 "fallback_used": False,
             }
 
@@ -64,10 +80,32 @@ def retriever_agent(query: str) -> Dict[str, Any]:
         )
 
         web_results = web_search(query)
+        
+        # Combine local + web
+        
+        all_results = filtered_docs + web_results
+        
+        # Rerank all results
+        
+        reranked_results = rerank_documents(
+            query=query,
+            documents=all_results,
+            top_k=5
+        )
+        
+        print("\n========== RERANKED RESULTS ==========")
+         
+        for i , doc in enumerate(reranked_results, 1):
+            
+             print(
+                f"[RERANK {i}] "
+                f"Score: {doc['rerank_score']}"
+            )
+            
 
         return {
             "source": "web",
-            "results": filtered_docs + web_results,
+            "results":  reranked_results,
             "fallback_used": True,
         }
 
