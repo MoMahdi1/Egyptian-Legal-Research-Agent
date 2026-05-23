@@ -1,13 +1,18 @@
 from app.agents.orchestrator import orchestrator_node
 from app.agents.retriever_agent import retriever_agent
+from app.agents.critic_agent import critic_node
+from app.agents.writer_agent import writer_node
 
-# Initial State
+
+# =========================
+# INITIAL STATE
+# =========================
+
 state = {
     "question": "هل يحق للمؤجر فسخ عقد الإيجار عند عدم سداد الأجرة؟",
     "rewritten_query": None,
     "search_queries": [],
-    "web_results": [],
-    "doc_results": [],
+    "retrieval_results": [],
     "critique": None,
     "final_report": None,
     "current_step": "orchestrating",
@@ -20,54 +25,54 @@ state = {
 state = orchestrator_node(state)
 
 print("\n========== AFTER ORCHESTRATOR ==========\n")
-
-print("Rewritten Query:")
-print(state["rewritten_query"])
+print("Rewritten Query:", state["rewritten_query"])
 
 print("\nGenerated Queries:")
-
 for q in state["search_queries"]:
     print("-", q)
 
+
 # =========================
-# STEP 2 → RETRIEVAL
+# STEP 2 → RETRIEVAL + RERANK
 # =========================
 
 all_results = []
 
 for query in state["search_queries"]:
 
-    print(f"\n\n========== RETRIEVING ==========")
-    print(f"Query: {query}")
+    print(f"\n========== RETRIEVING ==========")
+    print("Query:", query)
 
     result = retriever_agent(query)
-
     all_results.append(result)
 
+# مهم جدًا: نحط النتائج في state
+state["retrieval_results"] = all_results
+
 # =========================
-# FINAL
+# STEP 3 → CRITIC
 # =========================
 
-print("\n\n========== FINAL RESULTS ==========\n")
+print("\n========== CRITIC PHASE ==========\n")
 
-for i, result in enumerate(all_results, 1):
+state = critic_node(state)
 
-    print(f"\n--- Retrieval {i} ---")
+print(state["critique"])
 
-    print("Source:", result["source"])
-    print("Fallback:", result["fallback_used"])
 
-    print("\nTop Results:\n")
+# =========================
+# STEP 4 → WRITER
+# =========================
 
-    for j, doc in enumerate(result["results"], 1):
+print("\n========== WRITER PHASE ==========\n")
 
-        print(f"Result {j}")
+state = writer_node(state)
 
-        if "rerank_score" in doc:
-            print("Rerank Score:", doc["rerank_score"])
+print(state["final_report"])
 
-        if "score" in doc:
-            print("Vector Score:", doc["score"])
 
-        print(doc["content"][:300])
-        print("\n====================\n")
+# =========================
+# DONE
+# =========================
+
+print("\n========== PIPELINE DONE ==========")
