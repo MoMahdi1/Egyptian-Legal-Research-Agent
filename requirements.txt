@@ -16,3 +16,6 @@ langchain-core
 langchain-ollama
 pydantic
 langchain-huggingface
+langchain_groq
+langchain_openai
+
