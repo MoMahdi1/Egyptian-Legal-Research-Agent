@@ -1,22 +1,30 @@
-# Deep-Research-Agent
-```
+Egyptian-Legal-Research-Agent/
+│
 ├── app/
+│   │
 │   ├── agents/
-│   │   ├── orchestrator.py
-│   │   ├── web_search_agent.py
-│   │   ├── document_agent.py
+│   │   ├── orchestrator_agent.py
+│   │   ├── retriever_agent.py
 │   │   ├── critic_agent.py
-│   │   └── writer_agent.py
+│   │   ├── writer_agent.py
+│   │   └── reranker.py
+│   │
+│   ├── llms/
+│   │   └── provider.py
+│   │
 │   ├── tools/
 │   │   ├── search.py
 │   │   └── retriever.py
-│   ├── graph.py        ← LangGraph هنا
-│   ├── state.py        ← shared state بين الـ agents
-│   ├── ingestion.py
+│   │
+│   ├── graph.py
+│   ├── state.py
 │   └── main.py
-├── data/chroma_db/
+│
+├── frontend/
+├── data/
+├── tests/
 ├── .env
+├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-└── requirements.txt
-```
+└── README.md
