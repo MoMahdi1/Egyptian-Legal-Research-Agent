@@ -16,41 +16,31 @@ load_dotenv()
 
 def get_llm():
 
-    provider = os.getenv("LLM_PROVIDER", "google")
-
-    if provider == "google":
-
-        print("Using Google Gemini")
-
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            api_key=os.getenv("GOOGLE_API_KEY"),
-            temperature=0.2,
-        )
-
-    elif provider == "groq":
-
+    if os.getenv("GROQ_API_KEY"):
         print("Using Groq")
-
         return ChatGroq(
             model="llama-3.3-70b-versatile",
             api_key=os.getenv("GROQ_API_KEY"),
             temperature=0.2,
         )
 
-    elif provider == "openai":
+    elif os.getenv("GOOGLE_API_KEY"):
+        print("Using Google Gemini")
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            temperature=0.2,
+        )
 
+    elif os.getenv("OPENAI_API_KEY"):
         print("Using OpenAI")
-
         return ChatOpenAI(
             model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
             temperature=0.2,
         )
 
-    else:
-
-        raise ValueError(f"Unsupported provider: {provider}")
+    raise RuntimeError("No LLM API key found.")
 
 
 # ==========================

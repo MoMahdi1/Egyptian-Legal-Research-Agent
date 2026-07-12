@@ -2,7 +2,7 @@ import json
 import time
 import requests
 
-from questions import QUESTIONS
+from app.questions import QUESTIONS
 
 API_URL = "http://127.0.0.1:8000/research"
 
