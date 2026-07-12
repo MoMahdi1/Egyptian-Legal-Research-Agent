@@ -1,98 +1,194 @@
-import os 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from app.state import ResearchState
+import logging
+
 from dotenv import load_dotenv
-from app.llms.provider import get_llm
+from langchain_core.prompts import ChatPromptTemplate
+
+from app.llms.provider import get_llm, invoke_llm
+from app.state import ResearchState
 
 load_dotenv()
-# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+logger = logging.getLogger(__name__)
 
 llm = get_llm()
 
-
+# ==========================================================
+# Prompt
+# ==========================================================
 prompt = ChatPromptTemplate.from_template(
-    """
-    انت كاتب قانوني متخصص في القانون المصري المدني وكتابة الأبحاث القانونية.
-    
-    اكتب تقريرا قانونيا شاملا بناءً على السؤال التالى :
-    
-    السؤال :
-    {question}
-    السؤال المحسن: 
-    {rewritten_query}
-    
-    المصادر:
-    {results}
-    
-    محلاحظات المرجع القانوني :
-    {critique}
-    
-    اكتب التقرير بهذا التنسيق بالضبط
-    
-    ## الملخص التنفيذي
-    [ملخص مختصر فى 2-3 جمل]
-    
-    ## الاجابة القانونية
-    [اجابة قانونية شاملة ومفصلة مدعمة بالمصادر القانونية]
-    
-    ## المواد القانونية ذات الصلة
-    [اذكر ارقام المواد والنصوص المرتبطة]
-    
-    ## المصادر المستخدمة
-    [documents / web]
-    
-    ## التحفظات 
-    [اي تحفظات او توصيات للمراجعة النهائية]
-    
-    """
+"""
+أنت باحث قانوني متخصص في القانون المدني المصري.
+
+مهمتك هي الإجابة عن السؤال اعتمادًا فقط على المصادر القانونية المسترجعة.
+
+==========================
+قواعد إلزامية
+==========================
+
+1. استخدم المعلومات الموجودة داخل المصادر فقط.
+2. ممنوع استخدام أي معلومة من معرفتك العامة.
+3. لا تخترع مواد قانونية.
+4. لا تخترع أحكام محكمة النقض.
+5. لا تستشهد إلا بالمواد الموجودة داخل المصادر.
+6. إذا كانت المصادر لا تكفي للإجابة فاذكر ذلك بوضوح.
+7. إذا كانت المصادر متعارضة فاذكر موضع التعارض.
+8. تجاهل أي مصدر غير مرتبط بالسؤال.
+9. لا تكرر نفس المعلومة أكثر من مرة.
+10. اجعل الإجابة طبيعية وكأنها صادرة من مستشار قانوني.
+
+==========================
+السؤال
+==========================
+
+{question}
+
+==========================
+السؤال بعد إعادة الصياغة
+==========================
+
+{rewritten_query}
+
+==========================
+المصادر المسترجعة
+==========================
+
+{results}
+
+==========================
+تقييم جودة المصادر
+==========================
+
+{critique}
+
+==========================
+المطلوب
+==========================
+
+قم أولاً بتحليل المصادر.
+
+بعد ذلك أجب على السؤال بهذا التنسيق فقط:
+
+## الإجابة المختصرة
+
+- اكتب إجابة مباشرة من 3 إلى 5 أسطر.
+- إذا كان السؤال يحتاج نعم أو لا فابدأ بها.
+- لا تذكر أسماء الوثائق أو الصفحات.
+
+---
+
+## الإجابة القانونية
+
+اشرح الإجابة بالتفصيل اعتمادًا فقط على النصوص القانونية الموجودة بالمصادر.
+
+- اذكر أرقام المواد القانونية داخل الشرح عند الحاجة.
+- اربط بين المواد إذا كان ذلك يساعد على الفهم.
+- إذا لم توجد إجابة مباشرة داخل المصادر فاذكر:
+"المعلومات القانونية المتاحة لا تكفي للإجابة بدقة."
+- لا تضف أي معلومات من خارج المصادر.
+- لا تذكر قسمًا للمصادر.
+- لا تذكر مستوى الثقة.
+- لا تذكر التحفظات.
+- لا تذكر أي عناوين أخرى غير المطلوبة.
+"""
 )
 
-def format_results(retrieval_results: list) ->str:
+# ==========================================================
+# Helpers
+# ==========================================================
+
+def format_results(retrieval_results: list) -> str:
+
     if not retrieval_results:
-        return "لا توجد مصادر ."
-    
-    formatted = []
-    
-    # handel both dict or list
+        return "لا توجد مصادر."
+
     if isinstance(retrieval_results, dict):
         retrieval_results = [retrieval_results]
-        
-        
-    for r in retrieval_results:
-        source = r.get("source","unknown")
-        
-        for item in r.get("results",[]):
-            content = item.get("content","")
-            
-            formatted.append(
-                f"[{source}] \n {content[:800]}\n"
-            )
-            
-    return "\n".join(formatted)[:4000]
 
+    formatted = []
+
+    counter = 1
+
+    for retrieval in retrieval_results:
+
+        source = retrieval.get("source", "unknown")
+
+        for item in retrieval.get("results", []):
+
+            content = item.get("content", "")
+            metadata = item.get("metadata", {})
+
+            formatted.append(
+f"""
+======================================================
+Document {counter}
+
+Source:
+{source}
+
+Source File:
+{metadata.get("source", "Unknown")}
+
+Page:
+{metadata.get("page", "N/A")}
+
+Content:
+{content[:1000]}
+
+======================================================
+"""
+            )
+
+            counter += 1
+
+    return "\n".join(formatted)
+
+# ==========================================================
+# Writer Node
+# ==========================================================
 
 def writer_node(state: ResearchState) -> ResearchState:
-    
-    result_text = format_results(
-        state.get("retrieval_results",[])
+
+    logger.info("========== ENTER WRITER ==========")
+
+    results_text = format_results(
+        state.get("retrieval_results", [])
     )
-        
-        
-    chain = prompt | llm
-    result = chain.invoke({
-        "question": state["question"],
-        "rewritten_query": state.get("rewritten_query",""),
-        "critique": state.get("critique"," لا توجد ملاحظات "),
-        "results": result_text
-    })
-       
-    print("\n========== WRITER OUTPUT ==========")
-    print(result.content[:1000])
+
+    if results_text.strip() == "لا توجد مصادر.":
+
+        logger.warning("No retrieved documents.")
+
+        return {
+            **state,
+            "final_report": "لم يتم العثور على مصادر قانونية كافية للإجابة على السؤال.",
+            "current_step": "final_report",
+        }
+
     
+
+    logger.info("Sending request to Writer LLM...")
+
+    messages = prompt.format_messages(
+        question=state["question"],
+        rewritten_query=state.get("rewritten_query", ""),
+        results=results_text,
+        critique=state.get(
+          "critique",
+          "لا توجد ملاحظات."
+    ),
+)
+
+    result = invoke_llm(llm, messages)
+
+    logger.info("Writer LLM Response Received")
+
+    logger.info("=" * 60)
+    logger.info("WRITER OUTPUT")
+    logger.info(result.content)
+    logger.info("=" * 60)
+
     return {
         **state,
         "final_report": result.content,
         "current_step": "final_report",
-        
     }

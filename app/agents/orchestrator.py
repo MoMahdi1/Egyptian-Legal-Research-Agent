@@ -1,138 +1,136 @@
-import os
 import json
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from app.state import ResearchState
+import logging
+
 from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+
 from app.llms.provider import get_llm
+from app.state import ResearchState
+
 load_dotenv()
 
-## LLM
-# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+logger = logging.getLogger(__name__)
 
 llm = get_llm()
 
-## Query Rewriting Prompt
-rewrite_prompt = ChatPromptTemplate.from_template(
-    """
-   أنت خبير قانوني متخصص في القانون المصري وإعادة صياغة استعلامات البحث القانونية.
+orchestrator_prompt = ChatPromptTemplate.from_template("""
+أنت محرك إعادة صياغة للأسئلة القانونية المصرية.
 
-المهمة:
-إعادة صياغة السؤال ليصبح مناسبًا لمحركات البحث القانونية وأنظمة RAG.
+هدفك:
+تحويل سؤال المستخدم إلى نسخة مناسبة للبحث داخل قاعدة بيانات قانونية (RAG)،
+ثم إنشاء 3 استعلامات بحث قريبة جداً من السؤال.
 
-قواعد مهمة:
-- حافظ على المعنى الأصلي بالكامل
-- استخدم مصطلحات قانونية دقيقة
-- حسّن الكلمات المفتاحية
-- اجعل السؤال واضحًا ومحدداً
-- إذا كان السؤال متعلقًا بالقانون أضف سياق "في القانون المصري"
-- لا تشرح
-- لا تضف إجابات
-- أرجع السؤال المحسن فقط
+مهم جداً:
+
+- لا تغير موضوع السؤال.
+- لا تغير نوع العقد أو الجريمة أو القانون.
+- لا تستخدم كلمات ليست موجودة فى السؤال إلا لو كانت مرادفات قانونية مباشرة.
+- لا تحول البيع إلى إيجار.
+- لا تحول المدني إلى تجاري.
+- لا تضيف مواضيع جديدة.
+- لا تستخدم كلمات عامة.
+- الاستعلامات الثلاثة يجب أن تكون قريبة جداً من السؤال الأصلى.
+
+أرجع JSON فقط.
+
+{{
+    "rewritten_query":"...",
+    "queries":[
+        "...",
+        "...",
+        "..."
+    ]
+}}
 
 السؤال:
+
 {query}
-
-السؤال المحسن:
-"""
-)
-
-## Rewrite Function
-
-def rewrite_query(query:str) -> str:
-    chain = rewrite_prompt | llm
-    
-    response = chain.invoke({
-        "query":query
-    })
-    
-    return response.content.strip()
+""")
 
 
-## Orchestrator Node
+def invoke_orchestrator(question: str):
 
-def orchestrator_node(state: ResearchState) -> ResearchState:
-    
+    chain = orchestrator_prompt | llm
+
+    response = chain.invoke(
+        {
+            "query": question
+        }
+    )
+
+    cleaned = (
+        response.content
+        .replace("```json", "")
+        .replace("```", "")
+        .strip()
+    )
+
+    return json.loads(cleaned)
+
+
+def orchestrator_node(state: ResearchState):
+
     original_question = state["question"]
-    
-    # Rewrite the original query
-    improved_query = rewrite_query(original_question)
-    print("=== REWRITE TEST ===")
-    print(improved_query)
-    # Generate multiple search queries
-    generation_prompt = f"""
-    انت باحث قانونى متخصص فى القانون المصرى .
-    
-    المطلوب:
-    توليد استعلامات بحث احترافيه ومتنوعة تساعد نظام 
-    RAG
-    على استرجاع افضل الوثائق القانونية .
-    
-    السوؤال:
-    {improved_query}
-    
-    التعليمات :
-    - انشئ 3 استعلامات مختلفة
-    - كل استعلام يركز على زاوية مختلفة
-    - استخدم مصطلحات قانونية دقيقة
-    - تجنب التكرار
-    - اجعل الاستعلام مناسب للبحث الدلالى Semantic Search
-    - اعد النتيجة فقط بصيغة JSON Array
-    
-    مثال :
-    [
-    "شروط فسخ عقد الإيجار في القانون المصري",
-    "أحكام محكمة النقض المصرية بشأن فسخ عقود الإيجار",
-    "الفرق بين الفسخ والبطلان في القانون المدني المصري"
-    ]
-    
-    """
-    
-    response = llm.invoke(generation_prompt)
-    
-    ## Parser Response
-    
-    try:
-        
-        cleaned = response.content.strip()
-        
-        cleaned = cleaned.replace("```json","")
-        cleaned = cleaned.replace("```","")
-        
-        queries = json.loads(cleaned)
-        
-        if not isinstance(queries , list):
-            raise ValueError("Response is not a list")
-        
-        # remove duplicates 
-        queries = list(dict.fromkeys(
-            q.strip() for q in queries if q.strip()
-            ))
-        
-        if len(queries) < 3:
-            queries.append(improved_query)
-    
-    except Exception as e:
-        print(f"[ERROR] Failed to parse queries: {e}")
 
-        queries = [improved_query]
-        
-    ## Logs
-    
-    print("\n========== ORCHESTRATOR =========")
-    print(f"[original] {original_question}")
-    print(f"[rewritten] {improved_query}")
-    
-    for i , q in enumerate(queries,1):
-        print(f"[query {i}] {q}")
-        
-        
-    # Return Updated State
-       
+    try:
+
+        data = invoke_orchestrator(original_question)
+
+        improved_query = data.get(
+            "rewritten_query",
+            original_question
+        )
+
+        queries = data.get(
+            "queries",
+            []
+        )
+
+        if not isinstance(queries, list):
+            raise Exception()
+
+        queries = [
+            q.strip()
+            for q in queries
+            if isinstance(q, str) and q.strip()
+        ]
+
+        queries = list(dict.fromkeys(queries))
+
+        if improved_query not in queries:
+            queries.insert(0, improved_query)
+
+        queries = queries[:3]
+
+        while len(queries) < 3:
+            queries.append(improved_query)
+
+    except Exception as e:
+
+        logger.exception("Orchestrator Parsing Error")
+
+        improved_query = original_question
+
+        queries = [
+            original_question,
+            original_question,
+            original_question
+        ]
+
+    logger.info("=" * 60)
+    logger.info("ORCHESTRATOR")
+
+    logger.info(f"Original : {original_question}")
+    logger.info(f"Rewrite  : {improved_query}")
+
+    for i, q in enumerate(queries, 1):
+        logger.info(f"Query {i}: {q}")
+
+    logger.info("=" * 60)
+
     return {
         **state,
         "rewritten_query": improved_query,
         "search_queries": queries,
-        "current_step": "retrieving",
-    }   
-    
+        "current_step": "retrieving"
+    }

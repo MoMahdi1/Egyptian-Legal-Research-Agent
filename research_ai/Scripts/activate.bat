@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=E:\Deep-Research-Agent\research_ai
+set VIRTUAL_ENV=E:\Egyptian-Legal-Research-Agent\research_ai
 
 if not defined PROMPT set PROMPT=$P$G
 

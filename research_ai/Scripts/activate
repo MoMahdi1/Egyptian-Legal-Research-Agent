@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="E:\Deep-Research-Agent\research_ai"
+VIRTUAL_ENV="E:\Egyptian-Legal-Research-Agent\research_ai"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

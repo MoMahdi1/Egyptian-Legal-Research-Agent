@@ -160,7 +160,6 @@
     line-height: 1.8;
   }
 
-
   /* ── Messages ── */
   .msg-row {
     display: flex;
@@ -231,7 +230,26 @@
 
   .bubble.bot h2:first-child { margin-top: 0; }
 
+  .bubble.bot h3 {
+    font-family: 'Amiri', serif;
+    font-size: 14px;
+    color: var(--gold-light);
+    margin: 10px 0 4px;
+    font-weight: 600;
+  }
+
   .bubble.bot strong { color: var(--gold-light); font-weight: 600; }
+
+  .bubble.bot p { margin-bottom: 8px; }
+  .bubble.bot p:last-child { margin-bottom: 0; }
+
+  .bubble.bot ul,
+  .bubble.bot ol {
+    margin: 6px 0 10px;
+    padding-inline-start: 22px;
+  }
+
+  .bubble.bot li { margin-bottom: 4px; }
 
   .meta-row {
     display: flex;
@@ -391,7 +409,6 @@
       </div>
       <h2>أهلاً بك في المستشار القانوني</h2>
       <p>اسألني عن أي موضوع في القانون المدني المصري وسأبحث في النصوص القانونية وأقدم إجابة قانونية مفصلة ودقيقة</p>
-
     </div>
   </main>
 
@@ -405,7 +422,7 @@
         onkeydown="onKey(event)"
         oninput="resize(this)"
       ></textarea>
-      <button class="send-btn" id="sendBtn" onclick="send()" title="إرسال">
+      <button class="send-btn" id="sendBtn" type="button" onclick="send()" title="إرسال">
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
         </svg>
@@ -419,13 +436,26 @@
 <script>
   const API = 'http://localhost:8000/research';
 
+  // guard بيمنع إرسال أكتر من ريكويست في نفس الوقت
+  let isSending = false;
+  let currentController = null;
+
   function resize(el) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
   function onKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   function addMsg(role, html) {
@@ -455,6 +485,11 @@
     return bubble;
   }
 
+  function addUserMsg(text) {
+    // نص المستخدم بيتعرض كنص عادي escaped، مش HTML
+    return addMsg('user', escapeHtml(text));
+  }
+
   function showTyping() {
     const chat = document.getElementById('chat');
     const row = document.createElement('div');
@@ -477,58 +512,116 @@
     if (t) t.remove();
   }
 
-  function formatReport(text) {
-    return text
-      .replace(/## (.+)/g, '<h2>$1</h2>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n{2,}/g, '</p><p>')
-      .replace(/\n/g, '<br>');
+  // تحويل نص التقرير (Markdown-ish) لـ HTML بأمان (escape الأول ثم تنسيق)
+  function formatReport(raw) {
+    let text = escapeHtml(raw);
+
+    // العناوين — ### قبل ## عشان الترتيب يبقى صح
+    text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+
+    // Bold
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // قوائم مرقمة
+    text = text.replace(/(^\d+\.\s.+(?:\n^\d+\.\s.+)*)/gm, (m) => {
+      const items = m.split('\n').map(l => `<li>${l.replace(/^\d+\.\s/, '')}</li>`).join('');
+      return `<ol>${items}</ol>`;
+    });
+
+    // قوائم نقطية
+    text = text.replace(/(^[-•]\s.+(?:\n^[-•]\s.+)*)/gm, (m) => {
+      const items = m.split('\n').map(l => `<li>${l.replace(/^[-•]\s/, '')}</li>`).join('');
+      return `<ul>${items}</ul>`;
+    });
+
+    // فقرات: سطرين فاضيين = فقرة جديدة
+    text = text
+      .split(/\n{2,}/)
+      .map(p => {
+        const trimmed = p.trim();
+        if (/^<(h2|h3|ol|ul)/.test(trimmed)) return trimmed;
+        return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+      })
+      .join('');
+
+    return text;
   }
 
   async function send() {
     const inp = document.getElementById('inp');
     const btn = document.getElementById('sendBtn');
     const question = inp.value.trim();
-    if (!question || btn.disabled) return;
+
+    // guard: منع أي إرسال تاني لحد ما الأول يخلص
+    if (!question || isSending) return;
+    isSending = true;
+    btn.disabled = true;
 
     const welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
 
-    addMsg('user', question);
+    addUserMsg(question);
     inp.value = '';
     inp.style.height = 'auto';
-    btn.disabled = true;
     showTyping();
 
+    // لو فيه ريكويست قديم لسه ماشي (احتياط إضافي)، نلغيه
+    if (currentController) currentController.abort();
+    currentController = new AbortController();
+
     try {
+      console.log('[legal-advisor] sending request →', API, { question });
+
       const res = await fetch(API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
+        signal: currentController.signal,
       });
 
-      if (!res.ok) throw new Error('Server error ' + res.status);
+      console.log('[legal-advisor] response status:', res.status);
+
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        throw new Error(`خطأ من الخادم (${res.status})${bodyText ? ': ' + bodyText.slice(0, 200) : ''}`);
+      }
+
       const data = await res.json();
+      console.log('[legal-advisor] response data:', data);
+
       removeTyping();
 
-      const srcLabel = data.sources.includes('web') ? '🌐 ويب' : '📄 وثائق قانونية';
-      const qCount   = data.queries_used.length;
+      const srcLabel = (data.sources || []).includes('web') ? '🌐 ويب' : '📄 وثائق قانونية';
+      const qCount   = (data.queries_used || []).length;
 
       const html = `
         <div class="meta-row">
           <span class="tag">${srcLabel}</span>
           <span class="tag">🔍 ${qCount} استعلامات</span>
-          ${data.rewritten_query ? `<span class="tag" title="${data.rewritten_query}">✏️ صياغة محسّنة</span>` : ''}
+          ${data.rewritten_query ? `<span class="tag" title="${escapeHtml(data.rewritten_query)}">✏️ صياغة محسّنة</span>` : ''}
         </div>
-        <p>${formatReport(data.report)}</p>
+        ${formatReport(data.report || '')}
       `;
 
       addMsg('bot', html);
 
     } catch (err) {
+      console.error('[legal-advisor] request failed:', err);
       removeTyping();
-      addMsg('bot', `<span style="color:#e57373">❌ ${err.message === 'Failed to fetch' ? 'تعذر الاتصال بالخادم — تأكد من تشغيل الـ API' : err.message}</span>`);
+
+      let msg = err.message;
+      if (err.name === 'AbortError') {
+        msg = null; // اتلغى لصالح ريكويست أحدث، ملحقش نعرض خطأ
+      } else if (msg === 'Failed to fetch') {
+        msg = 'تعذر الاتصال بالخادم — تأكد إن الـ API شغال على localhost:8000 وإن الـ CORS مظبوط';
+      }
+
+      if (msg) {
+        addMsg('bot', `<span style="color:#e57373">❌ ${escapeHtml(msg)}</span>`);
+      }
     } finally {
+      isSending = false;
       btn.disabled = false;
       inp.focus();
     }
